@@ -1,0 +1,10 @@
+version: '3'
+
+tasks:
+  run:
+    cmds:
+      - defer: rm -f ./xdp-killswitch
+      - go generate ./...
+      - go build .
+      - chmod +x ./xdp-killswitch
+      - sudo ./xdp-killswitch
