@@ -11,14 +11,6 @@ import (
 	"github.com/jnfrati/xdp-inspector/xdp"
 )
 
-// import (
-// 	"log"
-
-// 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
-// 	"github.com/apache/arrow/go/arrow"
-// 	"github.com/apache/arrow/go/arrow/array"
-// )
-
 func GetSchema() *arrow.Schema {
 	return arrow.NewSchema([]arrow.Field{
 		{Name: "source_ip", Type: arrow.BinaryTypes.String, Nullable: true},
