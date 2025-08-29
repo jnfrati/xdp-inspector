@@ -5,11 +5,42 @@
 #include <bpf/bpf_endian.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/in.h>
+#include <linux/icmp.h>
+#include <linux/udp.h>
+#include <linux/tcp.h>
+#include "lib/parsing_helpers.h"
 
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 #define MAX_MAP_ENTRIES 16
+
+struct ip_addr {
+    __u8 family;  // AF_INET or AF_INET6
+    union {
+        __be32 v4_addr;           // IPv4 address (4 bytes)
+        __be32 v6_addr[4];        // IPv6 address (16 bytes as 4 x 32-bit)
+        // Alternative: __u8 v6_addr[16];
+    } addr;
+} __attribute__((packed));
+
+struct packet_event {
+	struct ip_addr src_ip;
+	struct ip_addr dst_ip;
+	__be16 src_port;
+	__be16 dst_port;
+	__u8  protocol;
+	__be32 packet_len;
+	__u64 timestamp; // no need to consider for endianness on timestamp, it's generated on the host eitherway
+} __attribute__((packed));
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24); // 16 MB buffer
+} xdp_packet_events SEC(".maps");
+
 
 /* Define an LRU hash map for storing packet count by source IPv4 address */
 struct {
@@ -19,56 +50,200 @@ struct {
 	__type(value, __u32); // packet count
 } xdp_stats_map SEC(".maps");
 
-/*
-Attempt to parse the IPv4 source address from the packet.
-Returns 0 if there is no IPv4 header field; otherwise returns non-zero.
-*/
-static __always_inline int parse_ip_src_addr(struct xdp_md *ctx, __u32 *ip_src_addr) {
-	void *data_end = (void *)(long)ctx->data_end;
-	void *data     = (void *)(long)ctx->data;
+static __always_inline int parse_packet_event_from_tcp(struct packet_event *event, struct tcphdr *tcph, unsigned short packet_len) {
+	event->src_port = tcph->source;
+	event->dst_port = tcph->dest;
+	event->protocol = IPPROTO_TCP;
+	event->packet_len = packet_len;
+	event->timestamp = bpf_ktime_get_ns();
 
-	// First, parse the ethernet header.
-	struct ethhdr *eth = data;
-	if ((void *)(eth + 1) > data_end) {
-		return 0;
-	}
+	return 0;
+} 
 
-	if (eth->h_proto != bpf_htons(ETH_P_IP)) {
-		// The protocol is not IPv4, so we can't parse an IPv4 source address.
-		return 0;
-	}
+static __always_inline int parse_packet_event_from_udp(struct packet_event *event, struct udphdr *udph, unsigned short packet_len) {
+	event->src_port = udph->source;
+	event->dst_port = udph->dest;
+	event->protocol = IPPROTO_UDP;
+	event->packet_len = packet_len;
+	event->timestamp = bpf_ktime_get_ns();
 
-	// Then parse the IP header.
-	struct iphdr *ip = (void *)(eth + 1);
-	if ((void *)(ip + 1) > data_end) {
-		return 0;
-	}
-
-	// Return the source IP address in network byte order.
-	*ip_src_addr = (__u32)(ip->saddr);
-	return 1;
+	return 0;
 }
 
-SEC("xdp")
-int xdp_prog_func(struct xdp_md *ctx) {
-	__u32 ip;
-	if (!parse_ip_src_addr(ctx, &ip)) {
-		// Not an IPv4 packet, so don't count it.
-		goto done;
+static __always_inline int parse_packet_event_from_icmp(struct packet_event *event, struct icmphdr *icmph, unsigned short packet_len) {
+	event->src_port = 0;
+	event->dst_port = 0;
+	event->protocol = IPPROTO_ICMP;
+	event->packet_len = packet_len;
+	event->timestamp = bpf_ktime_get_ns();
+
+	return 0;
+}
+
+
+static __always_inline int parse_event_from_ipv4(struct hdr_cursor *nh, void *data_end, struct packet_event *event) {
+
+	struct iphdr *iph;
+
+	int ip_proto = parse_iphdr(nh, data_end, &iph);	
+	if (ip_proto < 0) {
+		return -1;
 	}
 
-	__u32 *pkt_count = bpf_map_lookup_elem(&xdp_stats_map, &ip);
+	// Set IP addresses
+	event->src_ip.family = AF_INET;
+	event->src_ip.addr.v4_addr = iph->saddr;
+	event->dst_ip.family = AF_INET;
+	event->dst_ip.addr.v4_addr = iph->daddr;
+
+	struct tcphdr *tcph;
+	struct udphdr *udph;
+	struct icmphdr *icmph;
+	switch (ip_proto)
+	{
+	case IPPROTO_TCP:
+		if (parse_tcphdr(nh, data_end, &tcph) < 0) {
+			return -1;
+		}
+		parse_packet_event_from_tcp(event, tcph, iph->tot_len);
+		break;
+	case IPPROTO_UDP:
+		if (parse_udphdr(nh, data_end, &udph) < 0) {
+			return -1;
+		}
+		parse_packet_event_from_udp(event, udph, iph->tot_len);
+		break;
+	case IPPROTO_ICMP:
+		if (parse_icmphdr(nh, data_end, &icmph) < 0) {
+			return -1;
+		}
+		parse_packet_event_from_icmp(event, icmph, iph->tot_len);
+		break;
+	default:
+		event->protocol = ip_proto;
+		event->timestamp = bpf_ktime_get_ns();
+	}
+
+
+	return 0;
+}
+
+
+static __always_inline int parse_event_from_ipv6(struct hdr_cursor *nh, void *data_end, struct packet_event *event) {
+
+	struct ipv6hdr *ip6h;
+
+	int ip_proto = parse_ip6hdr(nh, data_end, &ip6h);
+	if (ip_proto < 0) {
+		return -1;
+	}
+
+	struct tcphdr *tcph;
+	struct udphdr *udph;
+	struct icmphdr *icmph;
+
+	event->src_ip.family = AF_INET6;
+	__builtin_memcpy(event->src_ip.addr.v6_addr, ip6h->saddr.in6_u.u6_addr32, 16);
+    
+	event->dst_ip.family = AF_INET6;
+	__builtin_memcpy(event->dst_ip.addr.v6_addr, ip6h->daddr.in6_u.u6_addr32, 16);
+
+
+	switch (ip_proto)
+	{
+	case IPPROTO_TCP:
+		if (parse_tcphdr(nh, data_end, &tcph) < 0) {
+			return -1;
+		}
+		parse_packet_event_from_tcp(event, tcph, ip6h->payload_len);
+		break;
+	case IPPROTO_UDP:
+		if (parse_udphdr(nh, data_end, &udph) < 0) {
+			return -1;
+		}
+		parse_packet_event_from_udp(event, udph, ip6h->payload_len);
+		break;
+	// case IPPROTO_ICMP:
+	// 	parse_icmphdr(nh, data_end, &icmph);
+	// 	parse_packet_event_from_icmp(event, icmph, ip6h->payload_len);
+	// 	break;
+	default:
+		event->protocol = ip_proto;
+		event->timestamp = bpf_ktime_get_ns();
+	}
+
+
+	return 0;
+}
+
+
+SEC("xdp")
+int xdp_packet_observer(struct xdp_md *ctx) {
+
+	
+	const char fmt_str[] = "Log lvl %d\n";
+
+	bpf_trace_printk(fmt_str, sizeof(fmt_str), 1);
+	struct hdr_cursor nh;
+	
+	nh.pos = (void *)(long)ctx->data;
+
+	struct ethhdr *ethh;
+	int eth_proto = parse_ethhdr(&nh, (void *)(long)ctx->data_end, &ethh);
+	if (eth_proto < 0) {
+		const char fmt_str2[] = "Failed to parse Ethernet header %d\n";
+		bpf_trace_printk(fmt_str2, sizeof(fmt_str2), ctx->data_end);
+		goto skip;
+	}
+
+	struct packet_event event = {};
+
+	int ip_proto = -1;
+	switch (eth_proto)
+	{
+	case bpf_htons(ETH_P_IP):
+
+		if (parse_event_from_ipv4(&nh, (void *)(long)ctx->data_end, &event) < 0) {
+			goto skip;
+		}
+		break;
+	case bpf_htons(ETH_P_IPV6):
+		if (parse_event_from_ipv6(&nh, (void *)(long)ctx->data_end, &event) < 0) {
+			goto skip;
+		}
+		break;
+	default:
+		const char fmt_str2[] = "Unknown Ethernet type %d\n";
+		bpf_trace_printk(fmt_str2, sizeof(fmt_str2), eth_proto);
+		goto skip;
+	}
+	
+	if (event.src_ip.family != AF_INET) {
+		// Only IPv4 is supported for stats map
+		goto emit;
+	}
+
+	__u32 src_ip = bpf_ntohl(event.src_ip.addr.v4_addr);
+
+	__u32 *pkt_count = bpf_map_lookup_elem(&xdp_stats_map, &src_ip);
 	if (!pkt_count) {
 		// No entry in the map for this IP address yet, so set the initial value to 1.
 		__u32 init_pkt_count = 1;
-		bpf_map_update_elem(&xdp_stats_map, &ip, &init_pkt_count, BPF_ANY);
+		bpf_map_update_elem(&xdp_stats_map, &src_ip, &init_pkt_count, BPF_ANY);
 	} else {
 		// Entry already exists for this IP address,
 		// so increment it atomically using an LLVM built-in.
 		__sync_fetch_and_add(pkt_count, 1);
 	}
 
-done:
+emit:
+	bpf_trace_printk(fmt_str, sizeof(fmt_str), 5);
+	bpf_ringbuf_output(&xdp_packet_events, &event, sizeof(event), 0);
+	return XDP_PASS;
+
+skip:
+	bpf_trace_printk(fmt_str, sizeof(fmt_str), 6);
 	// Try changing this to XDP_DROP and see what happens!
 	return XDP_PASS;
 }
+

@@ -54,14 +54,15 @@ type xdpSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdpProgramSpecs struct {
-	XdpProgFunc *ebpf.ProgramSpec `ebpf:"xdp_prog_func"`
+	XdpPacketObserver *ebpf.ProgramSpec `ebpf:"xdp_packet_observer"`
 }
 
 // xdpMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdpMapSpecs struct {
-	XdpStatsMap *ebpf.MapSpec `ebpf:"xdp_stats_map"`
+	XdpPacketEvents *ebpf.MapSpec `ebpf:"xdp_packet_events"`
+	XdpStatsMap     *ebpf.MapSpec `ebpf:"xdp_stats_map"`
 }
 
 // xdpVariableSpecs contains global variables before they are loaded into the kernel.
@@ -90,11 +91,13 @@ func (o *xdpObjects) Close() error {
 //
 // It can be passed to loadXdpObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdpMaps struct {
-	XdpStatsMap *ebpf.Map `ebpf:"xdp_stats_map"`
+	XdpPacketEvents *ebpf.Map `ebpf:"xdp_packet_events"`
+	XdpStatsMap     *ebpf.Map `ebpf:"xdp_stats_map"`
 }
 
 func (m *xdpMaps) Close() error {
 	return _XdpClose(
+		m.XdpPacketEvents,
 		m.XdpStatsMap,
 	)
 }
@@ -109,12 +112,12 @@ type xdpVariables struct {
 //
 // It can be passed to loadXdpObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdpPrograms struct {
-	XdpProgFunc *ebpf.Program `ebpf:"xdp_prog_func"`
+	XdpPacketObserver *ebpf.Program `ebpf:"xdp_packet_observer"`
 }
 
 func (p *xdpPrograms) Close() error {
 	return _XdpClose(
-		p.XdpProgFunc,
+		p.XdpPacketObserver,
 	)
 }
 
