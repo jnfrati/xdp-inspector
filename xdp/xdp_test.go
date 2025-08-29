@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jnfrati/xdp-killswitch/xdp"
+	"github.com/jnfrati/xdp-inspector/xdp"
 )
 
 func TestIpv4Parsing(t *testing.T) {

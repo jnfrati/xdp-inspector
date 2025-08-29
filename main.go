@@ -1,59 +1,54 @@
 package main
 
 import (
-	"github.com/jnfrati/xdp-killswitch/xdp"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/jnfrati/xdp-inspector/db"
+	"github.com/jnfrati/xdp-inspector/xdp"
 )
 
+const BUF_SIZE = 100
+
 func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
-	xdp.Start()
-	// // Remove resource limits for kernels <5.11.
-	// if err := rlimit.RemoveMemlock(); err != nil {
-	// 	log.Fatal("Removing memlock:", err)
-	// }
+	w, err := db.InitParquetWriter()
+	if err != nil {
+		log.Fatalf("Couldn't init parquet writer: %v", err)
+	}
+	defer w.Close()
 
-	// // Load the compiled eBPF ELF and load it into the kernel.
-	// var objs counterObjects
-	// if err := loadCounterObjects(&objs, nil); err != nil {
-	// 	log.Fatal("Loading eBPF objects:", err)
-	// }
-	// defer objs.Close()
+	packetChan := make(chan *xdp.EventPayload, 10000)
+	go xdp.StartXdpListener(ctx, packetChan)
 
-	// ifname := "eno1" // Change this to an interface on your machine.
-	// iface, err := net.InterfaceByName(ifname)
-	// if err != nil {
-	// 	log.Fatalf("Getting interface %s: %s", ifname, err)
-	// }
+	go func() {
+		fmt.Println("Starting packet processor...")
 
-	// // Attach count_packets to the network interface.
-	// link, err := link.AttachXDP(link.XDPOptions{
-	// 	Program:   objs.CountPackets,
-	// 	Interface: iface.Index,
-	// })
-	// if err != nil {
-	// 	log.Fatal("Attaching XDP:", err)
-	// }
-	// defer link.Close()
+		buf := make([]*xdp.EventPayload, 0, BUF_SIZE)
+		for {
+			select {
+			case event := <-packetChan:
+				log.Default().Print("Buf full, inserting batch...")
+				if err := db.Insert(w, event); err != nil {
+					log.Printf("Error inserting packet batch: %v", err)
+				}
+			case <-ctx.Done():
+				if len(buf) > 0 {
+					if err := db.InsertBatch(w, buf); err != nil {
+						log.Printf("Error inserting final packet batch: %v", err)
+					}
+				}
+				return
+			}
+		}
+	}()
 
-	// log.Printf("Counting incoming packets on %s..", ifname)
-
-	// // Periodically fetch the packet counter from PktCount,
-	// // exit the program when interrupted.
-	// tick := time.Tick(time.Second)
-	// stop := make(chan os.Signal, 5)
-	// signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	// for {
-	// 	select {
-	// 	case <-tick:
-	// 		var count uint64
-	// 		err := objs.PktCount.Lookup(uint32(0), &count)
-	// 		if err != nil {
-	// 			log.Fatal("Map lookup:", err)
-	// 		}
-	// 		log.Printf("Received %d packets", count)
-	// 	case <-stop:
-	// 		log.Print("Received signal, exiting..")
-	// 		return
-	// 	}
-	// }
+	<-ctx.Done()
+	fmt.Println("Shutting down...")
 }

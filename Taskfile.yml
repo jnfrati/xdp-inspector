@@ -8,3 +8,6 @@ tasks:
       - go build .
       - chmod +x ./xdp-killswitch
       - sudo ./xdp-killswitch
+  gen:
+    cmds:
+      - go generate ./...

@@ -15,18 +15,35 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
+type Protocol uint8
+
+func (p Protocol) String() string {
+	switch p {
+	case 1:
+		return "ICMP"
+	case 2:
+		return "IGMP"
+	case 6:
+		return "TCP"
+	case 17:
+		return "UDP"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type EventPayload struct {
 	SourceIP        netip.Addr
 	DestinationIP   netip.Addr
 	SourcePort      uint16
 	DestinationPort uint16
-	Protocol        uint8
+	Protocol        Protocol
 	PacketLength    uint32
 	Timestamp       uint64
 }
 
 func (ep *EventPayload) FromBytes(data []byte) error {
-	log.Default().Printf("Parsing raw event data (len=%d): %v\n", len(data), data)
+	// log.Default().Printf("Parsing raw event data (len=%d): %v\n", len(data), data)
 
 	if len(data) < 25 {
 		return fmt.Errorf("invalid data length: got %d, expected at least 25", len(data))
@@ -59,11 +76,11 @@ func (ep *EventPayload) FromBytes(data []byte) error {
 	ep.SourcePort = srcPort
 	ep.DestinationPort = dstPort
 
-	ep.Protocol = data[offset]
+	ep.Protocol = Protocol(data[offset])
 	ep.PacketLength = binary.LittleEndian.Uint32(data[offset+1 : offset+5])
 	ep.Timestamp = binary.LittleEndian.Uint64(data[offset+5 : offset+13])
 
-	log.Default().Printf("Parsed event: %+v\n", ep)
+	// log.Default().Printf("Parsed event: %+v\n", ep)
 	return nil
 }
 
@@ -80,7 +97,7 @@ func parseIpFromBytes(data []byte, offset int) (*netip.Addr, int, error) {
 		}
 
 		dstIPBytes := [4]byte(data[offset : offset+4])
-		log.Default().Printf("Parsed IPv4 bytes: %v\n", dstIPBytes)
+		// log.Default().Printf("Parsed IPv4 bytes: %v\n", dstIPBytes)
 
 		ipv4 := netip.AddrFrom4(dstIPBytes)
 		ip = &ipv4
