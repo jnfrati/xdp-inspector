@@ -33,7 +33,6 @@ struct packet_event {
 	__be16 dst_port;
 	__u8  protocol;
 	__be32 packet_len;
-	__u64 timestamp; // no need to consider for endianness on timestamp, it's generated on the host eitherway
 } __attribute__((packed));
 
 struct {
@@ -55,7 +54,6 @@ static __always_inline int parse_packet_event_from_tcp(struct packet_event *even
 	event->dst_port = tcph->dest;
 	event->protocol = IPPROTO_TCP;
 	event->packet_len = packet_len;
-	event->timestamp = bpf_ktime_get_ns();
 
 	return 0;
 } 
@@ -65,7 +63,6 @@ static __always_inline int parse_packet_event_from_udp(struct packet_event *even
 	event->dst_port = udph->dest;
 	event->protocol = IPPROTO_UDP;
 	event->packet_len = packet_len;
-	event->timestamp = bpf_ktime_get_ns();
 
 	return 0;
 }
@@ -75,7 +72,6 @@ static __always_inline int parse_packet_event_from_icmp(struct packet_event *eve
 	event->dst_port = 0;
 	event->protocol = IPPROTO_ICMP;
 	event->packet_len = packet_len;
-	event->timestamp = bpf_ktime_get_ns();
 
 	return 0;
 }
@@ -121,7 +117,6 @@ static __always_inline int parse_event_from_ipv4(struct hdr_cursor *nh, void *da
 		break;
 	default:
 		event->protocol = ip_proto;
-		event->timestamp = bpf_ktime_get_ns();
 	}
 
 
@@ -169,7 +164,6 @@ static __always_inline int parse_event_from_ipv6(struct hdr_cursor *nh, void *da
 	// 	break;
 	default:
 		event->protocol = ip_proto;
-		event->timestamp = bpf_ktime_get_ns();
 	}
 
 

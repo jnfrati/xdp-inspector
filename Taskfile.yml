@@ -1,13 +1,21 @@
 version: '3'
 
 tasks:
-  run:
+  record:
     cmds:
-      - defer: rm -f ./xdp-killswitch
+      - defer: rm -f ./xdp-inspector
       - go generate ./...
       - go build .
-      - chmod +x ./xdp-killswitch
-      - sudo ./xdp-killswitch
+      - chmod +x ./xdp-inspector
+      - sudo ./xdp-inspector record --interface=eno1 --output=output.parquet --duration=1m
   gen:
     cmds:
       - go generate ./...
+
+  exec:
+    cmds:
+      - defer: rm -f ./xdp-inspector
+      - go generate ./...
+      - go build .
+      - chmod +x ./xdp-inspector
+      - sudo ./xdp-inspector {{.CLI_ARGS}}

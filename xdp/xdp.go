@@ -39,7 +39,7 @@ type EventPayload struct {
 	DestinationPort uint16
 	Protocol        Protocol
 	PacketLength    uint32
-	Timestamp       uint64
+	Timestamp       time.Time
 }
 
 func (ep *EventPayload) FromBytes(data []byte) error {
@@ -78,9 +78,8 @@ func (ep *EventPayload) FromBytes(data []byte) error {
 
 	ep.Protocol = Protocol(data[offset])
 	ep.PacketLength = binary.LittleEndian.Uint32(data[offset+1 : offset+5])
-	ep.Timestamp = binary.LittleEndian.Uint64(data[offset+5 : offset+13])
-
-	// log.Default().Printf("Parsed event: %+v\n", ep)
+	ep.Timestamp = time.Now()
+	log.Default().Printf("Parsed event: %+v\n", ep)
 	return nil
 }
 
@@ -127,7 +126,7 @@ func getPort(data []byte, offset int) (uint16, int, error) {
 	return port, offset, nil
 }
 
-func StartXdpListener(ctx context.Context, packetChan chan *EventPayload) {
+func StartXdpListener(ctx context.Context, ifname string, packetChan chan *EventPayload) {
 	// Remove resource limits for kernels <5.11.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatal("Removing memlock:", err)
@@ -140,7 +139,6 @@ func StartXdpListener(ctx context.Context, packetChan chan *EventPayload) {
 	}
 	defer objs.Close()
 
-	ifname := "eno1" // Change this to an interface on your machine.
 	iface, err := net.InterfaceByName(ifname)
 	if err != nil {
 		log.Fatalf("Getting interface %s: %s", ifname, err)

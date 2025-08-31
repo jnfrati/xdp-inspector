@@ -27,13 +27,18 @@ func Insert(writer *pqarrow.FileWriter, packet *xdp.EventPayload) error {
 	b := array.NewRecordBuilder(memory.NewGoAllocator(), GetSchema())
 	defer b.Release()
 
+	timestamp, err := arrow.TimestampFromTime(packet.Timestamp, arrow.Millisecond)
+	if err != nil {
+		return err
+	}
+
 	b.Field(0).(*array.StringBuilder).Append(packet.SourceIP.String())
 	b.Field(1).(*array.StringBuilder).Append(packet.DestinationIP.String())
 	b.Field(2).(*array.Uint16Builder).Append(packet.SourcePort)
 	b.Field(3).(*array.Uint16Builder).Append(packet.DestinationPort)
 	b.Field(4).(*array.StringBuilder).Append(packet.Protocol.String())
 	b.Field(5).(*array.Uint32Builder).Append(packet.PacketLength)
-	b.Field(6).(*array.TimestampBuilder).Append(arrow.Timestamp(packet.Timestamp))
+	b.Field(6).(*array.TimestampBuilder).Append(timestamp)
 
 	rec := b.NewRecord()
 	defer rec.Release()
@@ -50,27 +55,33 @@ func InsertBatch(writer *pqarrow.FileWriter, packets []*xdp.EventPayload) error 
 	b := array.NewRecordBuilder(memory.NewGoAllocator(), GetSchema())
 	defer b.Release()
 
-	b.Field(0).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) string {
-		return p.SourceIP.String()
-	}), nil)
-	b.Field(1).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) string {
-		return p.DestinationIP.String()
-	}), nil)
-	b.Field(2).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) uint16 {
-		return p.SourcePort
-	}), nil)
-	b.Field(3).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) uint16 {
-		return p.DestinationPort
-	}), nil)
-	b.Field(4).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) string {
-		return p.Protocol.String()
-	}), nil)
-	b.Field(5).(*array.Uint32Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) uint32 {
-		return p.PacketLength
-	}), nil)
-	b.Field(6).(*array.TimestampBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) arrow.Timestamp {
-		return arrow.Timestamp(p.Timestamp)
-	}), nil)
+	b.Field(0).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+		return p.SourceIP.String(), true
+	}))
+	b.Field(1).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+		return p.DestinationIP.String(), true
+	}))
+	b.Field(2).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint16, bool) {
+		return p.SourcePort, true
+	}))
+	b.Field(3).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint16, bool) {
+		return p.DestinationPort, true
+	}))
+	b.Field(4).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+		return p.Protocol.String(), true
+	}))
+	b.Field(5).(*array.Uint32Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint32, bool) {
+		return p.PacketLength, true
+	}))
+	b.Field(6).(*array.TimestampBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (arrow.Timestamp, bool) {
+		timestamp, err := arrow.TimestampFromTime(p.Timestamp, arrow.Millisecond)
+		if err != nil {
+			log.Println("Error converting timestamp:", err)
+			dumbTimestamp := arrow.Timestamp(0)
+			return dumbTimestamp, false
+		}
+		return timestamp, true
+	}))
 
 	rec := b.NewRecord()
 	defer rec.Release()
@@ -84,17 +95,19 @@ func InsertBatch(writer *pqarrow.FileWriter, packets []*xdp.EventPayload) error 
 
 }
 
-func ReduceFromField[T any](packets []*xdp.EventPayload, fieldFunc func(*xdp.EventPayload) T) []T {
+func ReduceFromField[T any](packets []*xdp.EventPayload, fieldFunc func(*xdp.EventPayload) (T, bool)) ([]T, []bool) {
 	var reduced []T
+	var valid []bool
 	for _, packet := range packets {
-		fieldValue := fieldFunc(packet)
+		fieldValue, ok := fieldFunc(packet)
 		reduced = append(reduced, fieldValue)
+		valid = append(valid, ok)
 	}
-	return reduced
+	return reduced, valid
 }
 
-func InitParquetWriter() (*pqarrow.FileWriter, error) {
-	f, err := os.Create("packets.parquet")
+func InitParquetWriter(filepath string) (*pqarrow.FileWriter, error) {
+	f, err := os.Create(filepath)
 	if err != nil {
 		return nil, err
 	}
