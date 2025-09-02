@@ -1,5 +1,9 @@
 {
   "files.associations": {
-    "parsing_helpers.h": "c"
+    "*.dbclient-js": "javascript",
+    "parsing_helpers.h": "c",
+    "udp.h": "c",
+    "packet_event.h": "c",
+    "bpf_helpers.h": "c"
   }
 }

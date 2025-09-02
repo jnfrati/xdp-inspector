@@ -69,6 +69,8 @@ type xdpMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdpVariableSpecs struct {
+	PACKET_DIRECTION_IN  *ebpf.VariableSpec `ebpf:"PACKET_DIRECTION_IN"`
+	PACKET_DIRECTION_OUT *ebpf.VariableSpec `ebpf:"PACKET_DIRECTION_OUT"`
 }
 
 // xdpObjects contains all objects after they have been loaded into the kernel.
@@ -106,6 +108,8 @@ func (m *xdpMaps) Close() error {
 //
 // It can be passed to loadXdpObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdpVariables struct {
+	PACKET_DIRECTION_IN  *ebpf.Variable `ebpf:"PACKET_DIRECTION_IN"`
+	PACKET_DIRECTION_OUT *ebpf.Variable `ebpf:"PACKET_DIRECTION_OUT"`
 }
 
 // xdpPrograms contains all programs after they have been loaded into the kernel.

@@ -8,7 +8,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
-	"github.com/jnfrati/xdp-inspector/xdp"
+	"github.com/jnfrati/xdp-inspector/types"
 )
 
 func GetSchema() *arrow.Schema {
@@ -19,11 +19,12 @@ func GetSchema() *arrow.Schema {
 		{Name: "destination_port", Type: arrow.PrimitiveTypes.Uint16, Nullable: true},
 		{Name: "protocol", Type: arrow.BinaryTypes.String, Nullable: true},
 		{Name: "packet_length", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+		{Name: "direction", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
 		{Name: "timestamp", Type: arrow.FixedWidthTypes.Timestamp_ms, Nullable: true},
 	}, nil)
 }
 
-func Insert(writer *pqarrow.FileWriter, packet *xdp.EventPayload) error {
+func Insert(writer *pqarrow.FileWriter, packet *types.EventPayload) error {
 	b := array.NewRecordBuilder(memory.NewGoAllocator(), GetSchema())
 	defer b.Release()
 
@@ -38,7 +39,8 @@ func Insert(writer *pqarrow.FileWriter, packet *xdp.EventPayload) error {
 	b.Field(3).(*array.Uint16Builder).Append(packet.DestinationPort)
 	b.Field(4).(*array.StringBuilder).Append(packet.Protocol.String())
 	b.Field(5).(*array.Uint32Builder).Append(packet.PacketLength)
-	b.Field(6).(*array.TimestampBuilder).Append(timestamp)
+	b.Field(6).(*array.Uint8Builder).Append(packet.Direction)
+	b.Field(7).(*array.TimestampBuilder).Append(timestamp)
 
 	rec := b.NewRecord()
 	defer rec.Release()
@@ -51,29 +53,32 @@ func Insert(writer *pqarrow.FileWriter, packet *xdp.EventPayload) error {
 	return nil
 }
 
-func InsertBatch(writer *pqarrow.FileWriter, packets []*xdp.EventPayload) error {
+func InsertBatch(writer *pqarrow.FileWriter, packets []*types.EventPayload) error {
 	b := array.NewRecordBuilder(memory.NewGoAllocator(), GetSchema())
 	defer b.Release()
 
-	b.Field(0).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+	b.Field(0).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (string, bool) {
 		return p.SourceIP.String(), true
 	}))
-	b.Field(1).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+	b.Field(1).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (string, bool) {
 		return p.DestinationIP.String(), true
 	}))
-	b.Field(2).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint16, bool) {
+	b.Field(2).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (uint16, bool) {
 		return p.SourcePort, true
 	}))
-	b.Field(3).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint16, bool) {
+	b.Field(3).(*array.Uint16Builder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (uint16, bool) {
 		return p.DestinationPort, true
 	}))
-	b.Field(4).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (string, bool) {
+	b.Field(4).(*array.StringBuilder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (string, bool) {
 		return p.Protocol.String(), true
 	}))
-	b.Field(5).(*array.Uint32Builder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (uint32, bool) {
+	b.Field(5).(*array.Uint32Builder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (uint32, bool) {
 		return p.PacketLength, true
 	}))
-	b.Field(6).(*array.TimestampBuilder).AppendValues(ReduceFromField(packets, func(p *xdp.EventPayload) (arrow.Timestamp, bool) {
+	b.Field(6).(*array.Uint8Builder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (uint8, bool) {
+		return p.Direction, true
+	}))
+	b.Field(7).(*array.TimestampBuilder).AppendValues(ReduceFromField(packets, func(p *types.EventPayload) (arrow.Timestamp, bool) {
 		timestamp, err := arrow.TimestampFromTime(p.Timestamp, arrow.Millisecond)
 		if err != nil {
 			log.Println("Error converting timestamp:", err)
@@ -95,7 +100,7 @@ func InsertBatch(writer *pqarrow.FileWriter, packets []*xdp.EventPayload) error 
 
 }
 
-func ReduceFromField[T any](packets []*xdp.EventPayload, fieldFunc func(*xdp.EventPayload) (T, bool)) ([]T, []bool) {
+func ReduceFromField[T any](packets []*types.EventPayload, fieldFunc func(*types.EventPayload) (T, bool)) ([]T, []bool) {
 	var reduced []T
 	var valid []bool
 	for _, packet := range packets {

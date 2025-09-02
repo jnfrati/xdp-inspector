@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/jnfrati/xdp-inspector/db"
-	"github.com/jnfrati/xdp-inspector/xdp"
+	"github.com/jnfrati/xdp-inspector/tc"
+	"github.com/jnfrati/xdp-inspector/types"
 	"github.com/spf13/cobra"
 )
 
@@ -55,19 +56,32 @@ func record(ctx context.Context, output string, iface string, duration string) {
 	}
 	defer w.Close()
 
-	packetChan := make(chan *xdp.EventPayload, 10000)
-	go xdp.StartXdpListener(ctx, iface, packetChan)
+	ingressChan := make(chan *types.EventPayload, 10000)
+	// go xdp.StartXdpListener(ctx, iface, ingressChan)
+
+	egressChan := make(chan *types.EventPayload, 10000)
+	go func() {
+		err := tc.StartTrafficControlEngressObserver(ctx, iface, egressChan)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	}()
 
 	go func() {
 		fmt.Println("Starting packet processor...")
 
-		buf := make([]*xdp.EventPayload, 0, BUF_SIZE)
+		buf := make([]*types.EventPayload, 0, BUF_SIZE)
 		for {
 			select {
-			case event := <-packetChan:
+			case event := <-ingressChan:
 				log.Default().Print("Buf full, inserting batch...")
 				if err := db.Insert(w, event); err != nil {
-					log.Printf("Error inserting packet batch: %v", err)
+					log.Printf("Dropping packet, couldn't store: %v", err)
+				}
+			case event := <-egressChan:
+				log.Printf("parsing egress")
+				if err := db.Insert(w, event); err != nil {
+					log.Printf("Dropping packet, couldn't store: %v", err)
 				}
 			case <-ctx.Done():
 				if len(buf) > 0 {

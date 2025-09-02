@@ -87,7 +87,7 @@ ORDER BY total_bytes DESC;
 
 func flows(filepath string) error {
 	q := `
-SELECT source_ip, 
+SELECT direction, source_ip, 
 	destination_ip,
 	source_port,
 	destination_port,
@@ -98,7 +98,8 @@ SELECT source_ip,
 	MAX(timestamp) as flow_end,
 	EXTRACT(EPOCH FROM (MAX(timestamp)::TIMESTAMP - MIN(timestamp)::TIMESTAMP)) as duration_seconds
 FROM read_parquet('` + filepath + `')
-GROUP BY source_ip, destination_ip, source_port, destination_port, protocol
+WHERE direction = 1
+GROUP BY direction, source_ip, destination_ip, source_port, destination_port, protocol
 HAVING packet_count > 10
 ORDER BY bytes DESC
 LIMIT 20;

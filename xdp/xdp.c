@@ -10,30 +10,14 @@
 #include <linux/icmp.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
-#include "lib/parsing_helpers.h"
+#include "../lib/parsing_helpers.h"
+#include "../lib/packet_event.h"
 
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 #define MAX_MAP_ENTRIES 16
 
-struct ip_addr {
-    __u8 family;  // AF_INET or AF_INET6
-    union {
-        __be32 v4_addr;           // IPv4 address (4 bytes)
-        __be32 v6_addr[4];        // IPv6 address (16 bytes as 4 x 32-bit)
-        // Alternative: __u8 v6_addr[16];
-    } addr;
-} __attribute__((packed));
-
-struct packet_event {
-	struct ip_addr src_ip;
-	struct ip_addr dst_ip;
-	__be16 src_port;
-	__be16 dst_port;
-	__u8  protocol;
-	__be32 packet_len;
-} __attribute__((packed));
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -190,7 +174,9 @@ int xdp_packet_observer(struct xdp_md *ctx) {
 		goto skip;
 	}
 
-	struct packet_event event = {};
+	struct packet_event event = {
+		.direction = PACKET_DIRECTION_IN,
+	};
 
 	int ip_proto = -1;
 	switch (eth_proto)

@@ -4,11 +4,11 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jnfrati/xdp-inspector/xdp"
+	"github.com/jnfrati/xdp-inspector/types"
 )
 
 func TestIpv4Parsing(t *testing.T) {
-	event := &xdp.EventPayload{}
+	event := &types.EventPayload{}
 	data := []byte{
 		2,                // Source IP Protocol ipv4
 		192, 168, 0, 185, // Source IP
@@ -49,7 +49,7 @@ func TestIpv4Parsing(t *testing.T) {
 }
 
 func TestIpv6Parsing(t *testing.T) {
-	event := &xdp.EventPayload{}
+	event := &types.EventPayload{}
 	data := []byte{
 		10, // Source IP Protocol ipv6
 		// Source IP (IPv6)
