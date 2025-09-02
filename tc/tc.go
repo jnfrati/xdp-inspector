@@ -34,6 +34,7 @@ func StartTrafficControlEngressObserver(ctx context.Context, ifname string, pack
 	link, err := link.AttachTCX(link.TCXOptions{
 		Interface: iface.Index,
 		Program:   objs.TcEgressObserver,
+		Attach:    ebpf.AttachTCXEgress,
 	})
 	if err != nil {
 		return errors.Wrap(err, "couldn't start tc egress observer, couldn't attach tcx program")

@@ -9,6 +9,7 @@ import (
 	"github.com/jnfrati/xdp-inspector/db"
 	"github.com/jnfrati/xdp-inspector/tc"
 	"github.com/jnfrati/xdp-inspector/types"
+	"github.com/jnfrati/xdp-inspector/xdp"
 	"github.com/spf13/cobra"
 )
 
@@ -57,7 +58,7 @@ func record(ctx context.Context, output string, iface string, duration string) {
 	defer w.Close()
 
 	ingressChan := make(chan *types.EventPayload, 10000)
-	// go xdp.StartXdpListener(ctx, iface, ingressChan)
+	go xdp.StartXdpListener(ctx, iface, ingressChan)
 
 	egressChan := make(chan *types.EventPayload, 10000)
 	go func() {

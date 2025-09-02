@@ -13,6 +13,8 @@
 #include "../lib/parsing_helpers.h"
 #include "../lib/packet_event.h"
 
+char __license[] SEC("license") = "Dual MIT/GPL";
+
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 24); // 16 MB buffer
@@ -22,33 +24,44 @@ struct {
 // xdp/tc.c - new file for TC program
 SEC("tc")
 int tc_egress_observer(struct __sk_buff *skb) {
-    // Similar parsing logic to your XDP program
-    // but using skb instead of xdp_md
-    
-    struct packet_event event = {};
+	struct hdr_cursor nh;
+	
+	nh.pos = (void *)(long)skb->data;
 
-    if (skb->family == AF_INET) {
-        event.src_ip.family = AF_INET;
-        event.src_ip.addr.v4_addr = bpf_htonl(skb->local_ip4);
-        event.dst_ip.family = AF_INET;
-        event.dst_ip.addr.v4_addr = bpf_htonl(skb->remote_ip4);
-    } else if (skb->family == AF_INET6) {
-        // event.src_ip.family = AF_INET6;
-        // event.src_ip.addr.v6_addr[0] = bpf_htonl(skb->local_ip6[0]);
-        // event.src_ip.addr.v6_addr[1] = bpf_htonl(skb->local_ip6[1]);
-        // event.src_ip.addr.v6_addr[2] = bpf_htonl(skb->local_ip6[2]);
-        // event.src_ip.addr.v6_addr[3] = bpf_htonl(skb->local_ip6[3]);
-        
-        // event.dst_ip.family = AF_INET6;
-        // event.dst_ip.addr.v6_addr[0] = bpf_htonl(skb->remote_ip6[0]);
-        // event.dst_ip.addr.v6_addr[1] = bpf_htonl(skb->remote_ip6[1]);
-        // event.dst_ip.addr.v6_addr[2] = bpf_htonl(skb->remote_ip6[2]);
-        // event.dst_ip.addr.v6_addr[3] = bpf_htonl(skb->remote_ip6[3]);
-    }
+	struct ethhdr *ethh;
+	int eth_proto = parse_ethhdr(&nh, (void *)(long)skb->data_end, &ethh);
+	if (eth_proto < 0) {
+		const char fmt_str2[] = "Failed to parse Ethernet header %d\n";
+		bpf_trace_printk(fmt_str2, sizeof(fmt_str2), skb->data_end);
+		goto skip;
+	}
 
-    event.direction = PACKET_DIRECTION_OUT;
+	struct packet_event event = {
+		.direction = PACKET_DIRECTION_OUT,
+	};
+
+	int ip_proto = -1;
+	switch (eth_proto)
+	{
+	case bpf_htons(ETH_P_IP):
+
+		if (parse_event_from_ipv4(&nh, (void *)(long)skb->data_end, &event) < 0) {
+			goto skip;
+		}
+		break;
+	case bpf_htons(ETH_P_IPV6):
+		if (parse_event_from_ipv6(&nh, (void *)(long)skb->data_end, &event) < 0) {
+			goto skip;
+		}
+		break;
+	default:
+		const char fmt_str2[] = "Unknown Ethernet type %d\n";
+		bpf_trace_printk(fmt_str2, sizeof(fmt_str2), eth_proto);
+		goto skip;
+	}
 
     bpf_ringbuf_output(&egress_packet_events, &event, sizeof(event), 0);
         
+skip:
     return 0;
 }

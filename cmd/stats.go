@@ -57,12 +57,12 @@ func topTalkers(filepath string) error {
 
 	q := `
 -- Who's eating bandwidth?
-SELECT source_ip, 
+SELECT direction, source_ip, 
        COUNT(*) as packet_count,
        SUM(packet_length) as total_bytes,
        AVG(packet_length) as avg_packet_size
 FROM read_parquet('` + filepath + `')
-GROUP BY source_ip 
+GROUP BY direction, source_ip 
 ORDER BY total_bytes DESC 
 LIMIT 10;
 `
@@ -74,12 +74,12 @@ LIMIT 10;
 func trafficByProtocol(filepath string) error {
 	q := `
 	-- Protocol breakdown
-SELECT protocol,
+SELECT direction, protocol,
        COUNT(*) as packet_count,
        SUM(packet_length) as total_bytes,
        AVG(packet_length) as avg_packet_size
 FROM read_parquet('` + filepath + `')
-GROUP BY protocol
+GROUP BY direction, protocol
 ORDER BY total_bytes DESC;
 `
 	return db.Query(q)
@@ -98,7 +98,6 @@ SELECT direction, source_ip,
 	MAX(timestamp) as flow_end,
 	EXTRACT(EPOCH FROM (MAX(timestamp)::TIMESTAMP - MIN(timestamp)::TIMESTAMP)) as duration_seconds
 FROM read_parquet('` + filepath + `')
-WHERE direction = 1
 GROUP BY direction, source_ip, destination_ip, source_port, destination_port, protocol
 HAVING packet_count > 10
 ORDER BY bytes DESC
